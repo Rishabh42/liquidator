@@ -1,14 +1,11 @@
-import BigNumber from 'bignumber.js';
-import {
-  ConfirmationType,
-} from '@dydxprotocol/solo/dist/src/types';
+import { BigNumber } from '@dydxprotocol/solo';
+import { ConfirmationType } from '@dydxprotocol/solo/dist/src/types';
 import { DateTime } from 'luxon';
 import { solo } from './web3';
 import { getLatestBlockTimestamp } from './block-helper';
 import { getGasPrice } from '../lib/gas-price';
 import Logger from '../lib/logger';
 
-const EXPIRATION_DELAY = Number(process.env.SOLO_EXPIRED_ACCOUNT_DELAY_SECONDS);
 const collateralPreferences = process.env.SOLO_COLLATERAL_PREFERENCES.split(',')
   .map(pref => pref.trim());
 const owedPreferences = process.env.SOLO_OWED_PREFERENCES.split(',')
@@ -16,7 +13,7 @@ const owedPreferences = process.env.SOLO_OWED_PREFERENCES.split(',')
 
 export async function liquidateAccount(account) {
   if (process.env.SOLO_LIQUIDATIONS_ENABLED !== 'true') {
-    return undefined;
+    return;
   }
 
   Logger.info({
@@ -41,12 +38,12 @@ export async function liquidateAccount(account) {
       accountUuid: account.uuid,
     });
 
-    return undefined;
+    return;
   }
 
   const sender = process.env.WALLET_ADDRESS;
-  const borrowMarkets = [];
-  const supplyMarkets = [];
+  const borrowMarkets: string[] = [];
+  const supplyMarkets: string[] = [];
 
   Object.keys(account.balances).forEach((marketId) => {
     const par = new BigNumber(account.balances[marketId].par);
@@ -68,7 +65,7 @@ export async function liquidateAccount(account) {
 
   const gasPrice = getGasPrice();
 
-  return solo.liquidatorProxy.liquidate(
+  await solo.liquidatorProxy.liquidate(
     process.env.WALLET_ADDRESS,
     new BigNumber(process.env.SOLO_ACCOUNT_NUMBER),
     account.owner,
@@ -87,7 +84,7 @@ export async function liquidateAccount(account) {
 
 export async function liquidateExpiredAccount(account, markets) {
   if (process.env.SOLO_EXPIRATIONS_ENABLED !== 'true') {
-    return undefined;
+    return;
   }
 
   Logger.info({
@@ -101,12 +98,12 @@ export async function liquidateExpiredAccount(account, markets) {
   const sender = process.env.WALLET_ADDRESS;
   const lastBlockTimestamp = await getLatestBlockTimestamp();
 
-  const expiredMarkets = [];
+  const expiredMarkets: string[] = [];
   const operation = solo.operation.initiate();
 
-  const weis = [];
-  const prices = [];
-  const spreadPremiums = [];
+  const weis: BigNumber[] = [];
+  const prices: BigNumber[] = [];
+  const spreadPremiums: BigNumber[] = [];
   const collateralPreferencesBN = collateralPreferences.map(p => new BigNumber(p));
 
   for (let i = 0; i < collateralPreferences.length; i += 1) {
@@ -145,7 +142,8 @@ export async function liquidateExpiredAccount(account, markets) {
     const expiryTimestamp = DateTime.fromISO(balance.expiresAt);
     const expiryTimestampBN = new BigNumber(Math.floor(expiryTimestamp.toMillis() / 1000));
     const lastBlockTimestampBN = new BigNumber(Math.floor(lastBlockTimestamp.toMillis() / 1000));
-    const delayHasPassed = expiryTimestamp + EXPIRATION_DELAY <= lastBlockTimestamp;
+    const delayHasPassed = expiryTimestampBN.plus(process.env.SOLO_EXPIRED_ACCOUNT_DELAY_SECONDS)
+      .lte(lastBlockTimestampBN);
 
     if (isV2Expiry && delayHasPassed) {
       expiredMarkets.push(marketId);
